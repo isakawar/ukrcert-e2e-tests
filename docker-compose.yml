@@ -1,0 +1,42 @@
+# Локальний запуск у Docker (той самий образ, що й у GitHub Actions):
+#   docker compose up       — етап 1: реєстрація (REG + INFRA)
+#   npm run docker:test     — усе (крім @slow)
+#   docker compose run --rm e2e --grep "REG-05"   — будь-які аргументи playwright test
+# Результати — у ./reports (Allure: reports/allure-report/awesome/index.html)
+services:
+  e2e:
+    build: .
+    image: e2e-ukr-cert
+    # За замовчуванням — етап 1; будь-які інші аргументи: docker compose run --rm e2e <аргументи playwright test>
+    command: ['--project=foreign', '--grep', 'REG-|INFRA-']
+    init: true
+    ipc: host # Chromium у Docker падає зі стандартним /dev/shm
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Ключ QA Sphere з ~/.zshrc (стандарт qa-base). Тест-ран створюється після кожного прогону;
+      # вимкнути: QAS_REPORT=0 docker compose up
+      QASPHERE_API_KEY: ${QASPHERE_API_KEY:-}
+      QAS_REPORT: ${QAS_REPORT:-1}
+      VIDEO: ${VIDEO:-}
+    volumes:
+      - ./reports:/out
+
+  # Перегляд тестів у Docker: Playwright UI Mode у браузері → http://localhost:8080
+  #   npm run docker:ui   (або docker compose --profile ui up ui)
+  ui:
+    profiles: [ui]
+    image: e2e-ukr-cert
+    build: .
+    init: true
+    ipc: host
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      QASPHERE_API_KEY: ${QASPHERE_API_KEY:-}
+      QAS_REPORT: '0' # інтерактивні прогони в QA Sphere не пишемо
+    command: ['--ui', '--ui-host=0.0.0.0', '--ui-port=8080']
+    ports:
+      - '8080:8080'

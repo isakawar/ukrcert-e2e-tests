@@ -1,0 +1,162 @@
+name: E2E
+
+# Запуск кнопкою: Actions → E2E → Run workflow
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Набір тестів
+        type: choice
+        default: registration
+        options:
+          - registration # етап 1: REG + INFRA
+          - smoke
+          - full # усе, крім @slow
+          - custom # за полем grep нижче
+      grep:
+        description: 'Для suite=custom: регулярка для назв/тегів (напр. "REG-05|AUTH-" або @critical)'
+        type: string
+        default: ''
+      qasphere:
+        description: Створити тест-ран з результатами в QA Sphere
+        type: boolean
+        default: true
+      include_slow:
+        description: Включити @slow (AUTH-05, +11 хв)
+        type: boolean
+        default: false
+
+run-name: 'E2E · ${{ inputs.suite }}${{ inputs.grep && format('' · {0}'', inputs.grep) || '''' }} · ${{ github.actor }}'
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    # Якщо dev доступний лише з VPN/білого списку IP — задай змінну репозиторію E2E_RUNNER (self-hosted)
+    runs-on: ${{ vars.E2E_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    env:
+      IMAGE: e2e-ukr-cert:ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Зібрати Docker-образ
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Перевірка типів
+        run: docker run --rm --entrypoint npm "$IMAGE" run -s typecheck
+
+      - name: Відновити історію Allure (тренди)
+        uses: actions/cache/restore@v4
+        with:
+          path: reports/allure-history
+          key: allure-history-${{ github.run_id }}
+          restore-keys: allure-history-
+
+      - name: Тести
+        env:
+          SUITE: ${{ inputs.suite }}
+          GREP: ${{ inputs.grep }}
+          # Несекретні налаштування — змінні репозиторію (Settings → Variables), з дефолтами для dev
+          ENV_NAME: ${{ vars.ENV_NAME || 'dev' }}
+          BASE_URL: ${{ vars.BASE_URL || 'https://lms-exam-foreign-dev.raccoongang.com' }}
+          ADMIN_BASE_URL: ${{ vars.ADMIN_BASE_URL }}
+          GEO_MODE: ${{ vars.GEO_MODE || 'none' }}
+          MAIL_PROVIDER: ${{ vars.MAIL_PROVIDER || 'maildrop' }}
+          EXAM_NAME: ${{ vars.EXAM_NAME }}
+          FOREIGN_TEST_CENTER_NAME: ${{ vars.FOREIGN_TEST_CENTER_NAME }}
+          REGULAR_TEST_CENTER_NAME: ${{ vars.REGULAR_TEST_CENTER_NAME }}
+          TOGGLE_TEST_CENTER_NAME: ${{ vars.TOGGLE_TEST_CENTER_NAME }}
+          TEST_PLAN_URL: ${{ vars.TEST_PLAN_URL }}
+          REPORT_OWNER: ${{ vars.REPORT_OWNER }}
+          BUILD_VERSION: ${{ github.sha }}
+          INCLUDE_SLOW: ${{ inputs.include_slow && '1' || '' }}
+          # Секрети (Settings → Secrets and variables → Actions)
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          PROCTOR_EMAIL: ${{ secrets.PROCTOR_EMAIL }}
+          PROCTOR_PASSWORD: ${{ secrets.PROCTOR_PASSWORD }}
+          # QA Sphere
+          QAS_REPORT: ${{ inputs.qasphere && '1' || '' }}
+          QAS_TOKEN: ${{ secrets.QASPHERE_API_KEY }}
+          QAS_URL: ${{ vars.QAS_URL || 'https://rg.eu1.qasphere.com' }}
+          QAS_PROJECT: ${{ vars.QAS_PROJECT || 'UKR' }}
+          QAS_RUN_NAME: 'E2E · ${{ vars.ENV_NAME || ''dev'' }} · {YYYY}-{MM}-{DD} {HH}:{mm} · GH #${{ github.run_number }} (${{ inputs.suite }})'
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
+        run: |
+          set -o pipefail
+          # Введення користувача — лише через змінні оточення, без підстановки в скрипт
+          case "$SUITE" in
+            registration) args=(--project=foreign --grep "REG-|INFRA-") ;;
+            smoke)        args=(--grep @smoke) ;;
+            full)         args=() ;;
+            custom)
+              [ -n "$GREP" ] || { echo "::error::Для suite=custom заповни поле grep"; exit 1; }
+              args=(--grep "$GREP") ;;
+          esac
+          echo "▶ playwright test ${args[*]}"
+
+          vars=(ENV_NAME BASE_URL ADMIN_BASE_URL GEO_MODE MAIL_PROVIDER EXAM_NAME FOREIGN_TEST_CENTER_NAME
+                REGULAR_TEST_CENTER_NAME TOGGLE_TEST_CENTER_NAME TEST_PLAN_URL REPORT_OWNER BUILD_VERSION INCLUDE_SLOW
+                ADMIN_EMAIL ADMIN_PASSWORD PROCTOR_EMAIL PROCTOR_PASSWORD
+                QAS_REPORT QAS_TOKEN QAS_URL QAS_PROJECT QAS_RUN_NAME REPO_URL)
+          env_args=(-e CI=1)
+          for v in "${vars[@]}"; do env_args+=(-e "$v"); done
+
+          mkdir -p reports
+          docker run --rm --init --ipc=host "${env_args[@]}" -v "$PWD/reports:/out" \
+            "$IMAGE" "${args[@]}" 2>&1 | tee run.log
+
+      - name: Підсумок
+        if: always()
+        run: |
+          docker run --rm --entrypoint node -v "$PWD:/work" -w /work "$IMAGE" \
+            /app/scripts/ci-summary.mjs reports/test-results/qasphere-report.json run.log >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Зберегти історію Allure
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: reports/allure-history
+          key: allure-history-${{ github.run_id }}
+
+      - name: Артефакт — Allure-звіт
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: reports/allure-report
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Артефакт — Playwright-звіт
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: reports/playwright-report
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Артефакт — trace/відео падінь
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: reports/test-results
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,0 +1,11 @@
+node_modules/
+.env
+.auth/
+test-results/
+playwright-report/
+allure-results/
+allure-report/
+allure-history/
+reports/
+.DS_Store
+qasphere/cases-to-create.json
