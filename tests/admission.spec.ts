@@ -2,6 +2,9 @@ import { env } from '../src/config/env';
 import { test, expect } from '../src/fixtures';
 
 test.describe('Допуск і проходження іспиту', { tag: '@foreign' }, () => {
+  // eslint-disable-next-line playwright/no-skipped-test -- етап 3: іспит і пункти тестування на dev ще не задані
+  test.skip(!env.hasExamData, 'EXAM_NAME не задано — кейси реєстрації на іспит і допуску пропущено');
+
   test('ADMIT-01 Відповідальний бачить реєстрацію «Очікує перевірки» і документ користувача', async ({ proctor, examRegisteredUser }) => {
     await proctor.admission.open();
     await proctor.admission.expectStatus(examRegisteredUser.email, 'Очікує перевірки');

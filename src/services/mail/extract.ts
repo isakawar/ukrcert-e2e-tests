@@ -1,6 +1,7 @@
 import type { MailMessage } from './MailClient';
 
-// TODO(dev): звірити з реальним шаблоном листа (довжина коду, вигляд посилання)
+// ✅ Код — 6 цифр (поле коду на dev: inputmode=numeric, minlength=maxlength=6).
+// TODO(dev): вигляд посилання активації — на dev листи поки не надсилаються (статус «Не вдалося надіслати»)
 const OTP_RE = /\b(\d{6})\b/;
 const ACTIVATION_URL_RE = /activat|confirm|verify/i;
 

@@ -68,6 +68,8 @@ export const env = {
   get mailApiUrl() { return required('MAIL_API_URL'); },
   get testEmailDomain() { return optional('TEST_EMAIL_DOMAIN') ?? 'e2e.test'; },
 
+  /** Без іспиту й пунктів тестування на dev кейси EXAM/ADMIT пропускаються (етап 3). */
+  get hasExamData() { return !!optional('EXAM_NAME'); },
   get examName() { return required('EXAM_NAME'); },
   get foreignTestCenter() { return required('FOREIGN_TEST_CENTER_NAME'); },
   get regularTestCenter() { return required('REGULAR_TEST_CENTER_NAME'); },

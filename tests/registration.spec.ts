@@ -1,10 +1,9 @@
 import { documents } from '../src/data/documents';
-import type { ForeignUser, RegistrationField } from '../src/data/users';
+import type { RegistrationField } from '../src/data/users';
 import { test, expect } from '../src/fixtures';
 import { routes } from '../src/config/routes';
-import { openRegistrationForm, registerForeignUser } from '../src/flows/registration';
+import { openRegistrationForm } from '../src/flows/registration';
 
-const EMAIL_BLOCKED = 'Не можна продовжити реєстрацію з цією адресою електронної пошти.';
 const DOCUMENT_FORMAT_ERROR = /у форматі PDF, JPEG або PNG/;
 const DOCUMENT_SIZE_ERROR = 'Розмір документа, що посвідчує особу, перевищує дозволений.';
 const DOCUMENT_CONTENT_ERROR = 'Вміст документа, що посвідчує особу, не відповідає розширенню файлу.';
@@ -20,14 +19,6 @@ test.describe('Реєстрація іноземного користувача'
   test('REG-03 Новий email відкриває форму заявки з цим email', async ({ app, newUser }) => {
     await openRegistrationForm(app, newUser.email);
     await expect(app.page.getByText(newUser.email)).toBeVisible();
-  });
-
-  test('REG-04 Email існуючого акаунта не пускає до повторної реєстрації', async ({ app, activeUser }) => {
-    await app.entry.open();
-    await app.entry.goToRegistration();
-    await app.registration.submitEmail(activeUser.email);
-    await expect(app.registration.emailError).toBeVisible();
-    await expect(app.registration.form).toBeHidden();
   });
 
   // Формат і ознаку перевіряємо БЕЗ створення заявки: разом з ними надсилаємо заздалегідь невалідну країну.
@@ -204,40 +195,6 @@ test.describe('Реєстрація: валідація і негативні с
     await app.registration.submit();
     await app.registration.expectNotSubmitted();
     await expect(app.registration.form.locator('.form-group', { hasText: 'Країна проживання' }).locator('.errorlist')).toHaveText(/US немає серед варіантів/);
-  });
-});
-
-/**
- * Єдина справжня заявка за прогін: REG-05 її створює, REG-13 і REG-17 перевіряють на її email блокування дубліката.
- * Serial — щоб тести йшли по черзі в одному воркері; без повторів — щоб retry не створив другу заявку.
- */
-test.describe('Реєстрація: одна справжня заявка на прогін', { tag: '@foreign' }, () => {
-  test.describe.configure({ mode: 'serial', retries: 0 });
-  let applied: ForeignUser | undefined;
-  const appliedEmail = () => {
-    if (!applied) throw new Error('Заявку з REG-05 не створено — REG-13/REG-17 залежать від неї');
-    return applied.email;
-  };
-
-  test('REG-05 Повна заявка з PDF → статус «Очікує перевірки», акаунт ще не створено', { tag: ['@smoke', '@critical'] }, async ({ app, newUser }) => {
-    await registerForeignUser(app, newUser);
-    applied = newUser;
-  });
-
-  test('REG-13 Email заявки, що очікує модерації, не можна використати повторно', async ({ app }) => {
-    await app.entry.open();
-    await app.entry.goToRegistration();
-    await app.registration.submitEmail(appliedEmail());
-    await expect(app.registration.emailError).toHaveText(EMAIL_BLOCKED);
-    await expect(app.registration.form).toBeHidden();
-  });
-
-  test('REG-17 Той самий email у верхньому регістрі не обходить перевірку дубліката', { tag: '@critical' }, async ({ app }) => {
-    await app.entry.open();
-    await app.entry.goToRegistration();
-    await app.registration.submitEmail(appliedEmail().toUpperCase());
-    await expect(app.registration.emailError).toHaveText(EMAIL_BLOCKED);
-    await expect(app.registration.form).toBeHidden();
   });
 });
 

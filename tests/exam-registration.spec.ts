@@ -3,6 +3,9 @@ import { test } from '../src/fixtures';
 import { registerForExam } from '../src/flows/exam';
 
 test.describe('Реєстрація на іспит', { tag: '@foreign' }, () => {
+  // eslint-disable-next-line playwright/no-skipped-test -- етап 3: іспит і пункти тестування на dev ще не задані
+  test.skip(!env.hasExamData, 'EXAM_NAME не задано — кейси реєстрації на іспит і допуску пропущено');
+
   test('EXAM-01 Іноземному користувачу доступний пункт «Тільки для іноземних»', { tag: '@critical' }, async ({ app, loggedInUser }) => {
     await app.exams.open();
     await app.exams.selectExam(env.examName);
@@ -15,6 +18,9 @@ test.describe('Реєстрація на іспит', { tag: '@foreign' }, () =>
 });
 
 test.describe('Пункти тестування: український користувач', { tag: '@ua' }, () => {
+  // eslint-disable-next-line playwright/no-skipped-test -- етап 3: іспит і пункти тестування на dev ще не задані
+  test.skip(!env.hasExamData, 'EXAM_NAME не задано — кейси реєстрації на іспит і допуску пропущено');
+
   test('EXAM-02 Пункт «Тільки для іноземних» недоступний українському користувачу', { tag: '@critical' }, async ({ uaApp }) => {
     await uaApp.exams.open();
     await uaApp.exams.selectExam(env.examName);

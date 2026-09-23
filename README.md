@@ -9,9 +9,10 @@ E2E-тести УкрСертифікації для іноземних кори
 ```bash
 npm install
 npx playwright install chromium
-cp .env.example .env   # вже налаштовано на dev; ADMIN_* — на етапі модерації
+cp .env.example .env   # вже налаштовано на dev; ADMIN_* — модератор (етап 2)
 npm run test:list      # перевірити, що тести підхопились (без .env теж працює)
 npm run test:reg       # етап 1: реєстрація + перевірка поштового сервісу
+npm run test:mod       # етап 2: модерація і вхід за кодом (заявки A і B)
 npm run test:smoke     # наскрізний happy path
 npm test               # усе, крім @slow
 ```
@@ -25,6 +26,7 @@ npm test               # усе, крім @slow
 | `npm run test:qas` | прогін + автоматичний тест-ран з результатами в QA Sphere |
 | `npm run report:qasphere` | залити результати останнього прогону в QA Sphere вручну |
 | `npm run report:clean` | прибрати результати попередніх прогонів |
+| `npm run cleanup -- --dry-run` | список тестових заявок/акаунтів (`ukrcert-*@maildrop.cc`) на dev; видалення — коли з'явиться API (PLAN.md, розд. 7) |
 | `npm run typecheck` / `lint` | TypeScript і ESLint (ловить забуті `await`) |
 
 Швидко прогнати анонімні кейси без логіну співробітників: `npx playwright test --project=ua --no-deps`.
@@ -61,7 +63,7 @@ QAS_REPORT=1 npm run docker:reg      # + тест-ран у QA Sphere
 
 | Поле | Значення |
 | --- | --- |
-| suite | `registration` (REG + INFRA), `smoke`, `full` (усе, крім @slow), `custom` |
+| suite | `registration` (REG + INFRA), `moderation` (заявки A і B: MOD, AUTH), `smoke`, `full` (усе, крім @slow), `custom` |
 | grep | для `custom`: регулярка по назві/тегу, напр. `REG-05\|AUTH-` або `@critical` |
 | qasphere | створити тест-ран з результатами в QA Sphere (за замовчуванням — так) |
 | include_slow | включити @slow (AUTH-05, +11 хв) |
@@ -73,9 +75,9 @@ QAS_REPORT=1 npm run docker:reg      # + тест-ран у QA Sphere
 | Тип | Назва | Що це |
 | --- | --- | --- |
 | Secret | `QASPHERE_API_KEY` | API-ключ QA Sphere (той самий, що в `~/.zshrc`) |
-| Secret | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | модератор (етап 2), поки можна не задавати |
+| Secret | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | модератор (етап 2) — задано |
 | Secret | `PROCTOR_EMAIL`, `PROCTOR_PASSWORD` | відповідальний за пункт тестування (необов'язково) |
-| Variable | `BASE_URL`, `ENV_NAME`, `GEO_MODE`, `MAIL_PROVIDER`, `QAS_PROJECT` | є дефолти для dev (`lms-exam-foreign-dev`, `none`, `maildrop`, `UKR`) — задавати лише для іншого оточення |
+| Variable | `BASE_URL`, `ADMIN_BASE_URL`, `ENV_NAME`, `GEO_MODE`, `MAIL_PROVIDER`, `QAS_PROJECT` | є дефолти для dev (`lms-exam-foreign-dev`, `lms-exam-dev`, `none`, `maildrop`, `UKR`) — задавати лише для іншого оточення |
 | Variable | `EXAM_NAME`, `*_TEST_CENTER_NAME` | тестові дані для кейсів іспитів (етап 3) |
 | Variable | `TEST_PLAN_URL`, `REPORT_OWNER` | посилання й власник у звіті |
 | Variable | `E2E_RUNNER` | мітка self-hosted runner, якщо dev недоступний з інтернету (VPN/білий список IP) |
@@ -84,9 +86,20 @@ QAS_REPORT=1 npm run docker:reg      # + тест-ран у QA Sphere
 
 1. **Закордонний IP** для проєкту `foreign`. Dev (`lms-exam-foreign-dev`) емулює його сам → `GEO_MODE=none`. Для інших оточень — проксі/VPN (`proxy`) або тестовий заголовок (`header`). Якщо точок входу для іноземця немає — тест падає з `[geo]` в окрему категорію звіту.
 2. **Пошта**: за замовчуванням [Maildrop](https://maildrop.cc) — публічні скриньки без реєстрації й ключів, кожен тест генерує свою адресу `ukrcert-…@maildrop.cc` і читає листи через GraphQL API. Скриньки публічні — лише тестові дані. Альтернатива — власний Mailpit (`MAIL_PROVIDER=mailpit`); інший сервіс = ще один `MailProvider` у `src/services/mail`.
-3. **Обліковки** (етап 2): адміністратор (модерація, пункти тестування) і, за наявності, відповідальний за пункт тестування. Без `ADMIN_*` кейси модерації/допуску автоматично skipped, реєстрація працює.
+3. **Обліковки** (етап 2): модератор — входить за паролем на **іншому хості**, `ADMIN_BASE_URL` (`lms-exam-dev`), меню користувача → «Заявки на реєстрацію іноземців»; за наявності — відповідальний за пункт тестування. Без `ADMIN_*` кейси модерації/допуску автоматично skipped, реєстрація працює.
 4. **Дані**: іспит і три пункти тестування — «тільки для іноземних», звичайний і окремий для перемикання в EXAM-03.
 5. Бажано: короткий TTL одноразового коду на dev, слот іспиту «зараз» (див. обмеження в PLAN.md).
+
+## Скільки заявок створює прогін
+
+Не більше **двох** справжніх заявок: кожна проходить кілька кейсів по черзі (стан — у `test-results/.run-state`, `src/fixtures/runState.ts`).
+
+| Заявка | Файл | Кейси |
+| --- | --- | --- |
+| A | `tests/journey.spec.ts` | REG-05 → REG-13/17 → MOD-01/02 → MOD-03 (схвалення) → REG-04 → AUTH-06/01/02/03/04 (AUTH-05 — `@slow`) |
+| B | `tests/moderation.spec.ts` | MOD-04 (відмова) → MOD-07 (HTML в імені) → MOD-05/06 (повторна подача) |
+
+Тому кейси з цих файлів ганяються цілим файлом: окремий тест без попередників упаде з поясненням, від якого кейсу він залежить. Повторів (retries) у цих ланцюгах немає — щоб не створювати зайвих заявок. Етапи після модерації (EXAM, ADMIT, PROFILE) беруть схваленого заявника A (`approvedUser`), нових заявок не створюють.
 
 ## Сесія українського користувача (для EXAM-02/03, REGR-02)
 

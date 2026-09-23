@@ -8,6 +8,9 @@ const initialDocument = fileNameOf(documents.pdf); // з ним реєструє
 const newDocument = fileNameOf(documents.jpg);
 
 test.describe('Профіль і заміна документа', { tag: '@foreign' }, () => {
+  // Кейси беруть схваленого заявника A (approvedUser) — нових заявок не створюють
+  test.fixme(true, 'Етап 4: профіль і вкладка модерації «Новий документ очікує перевірки» ще не звірені з dev');
+
   test('PROFILE-01 У профілі видно актуальний документ', async ({ app, loggedInUser }) => {
     await app.profile.open();
     await app.profile.expectCurrentDocument(fileNameOf(loggedInUser.document));

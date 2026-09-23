@@ -37,6 +37,12 @@ export class RegistrationPage {
   readonly statusHeading: Locator;
   readonly statusPending: Locator;
   readonly statusNotice: Locator;
+  readonly statusApproved: Locator;
+  readonly statusRejected: Locator;
+  /** «Причина: …» на сторінці статусу відхиленої заявки */
+  readonly rejectionReason: Locator;
+  readonly resubmitLink: Locator;
+  readonly loginLink: Locator;
 
   constructor(private readonly page: Page) {
     this.emailInput = page.getByLabel('Електронна пошта');
@@ -53,7 +59,7 @@ export class RegistrationPage {
     this.residencePermit = this.form.getByLabel('Я маю тимчасову посвідку на проживання в Україні');
     this.consent = this.form.getByLabel('Я надаю згоду на обробку персональних даних');
     this.nameConfirmed = this.form.getByLabel(/написання мого імені є остаточним/);
-    this.submitButton = this.form.getByRole('button', { name: 'Подати заявку' });
+    this.submitButton = this.form.getByRole('button', { name: 'Подати заявку' }); // і «Подати заявку повторно»
     this.hiddenEmail = this.form.locator('input[type="hidden"][name="email"]');
     this.formErrors = this.form.locator('.errorlist');
 
@@ -61,6 +67,11 @@ export class RegistrationPage {
     this.statusHeading = page.getByRole('heading', { name: 'Статус заявки на реєстрацію' });
     this.statusPending = page.getByText('Очікує перевірки', { exact: true });
     this.statusNotice = page.getByText('Ваша заявка очікує перевірки Модератором.');
+    this.statusApproved = page.getByText('Вашу заявку схвалено. Тепер ви можете увійти за одноразовим кодом з електронної пошти.');
+    this.statusRejected = page.getByText('Вашу заявку не схвалено.');
+    this.rejectionReason = page.locator('main p').filter({ hasText: /^\s*Причина:/ }); // <p><strong>Причина:</strong> …</p>
+    this.resubmitLink = page.getByRole('link', { name: 'Виправити та подати повторно' });
+    this.loginLink = page.locator('main').getByRole('link', { name: 'Увійти', exact: true });
   }
 
   /** Крок 1: ввести email і перейти до форми заявки (або отримати помилку на тому ж кроці). */
@@ -142,6 +153,22 @@ export class RegistrationPage {
     const id = this.page.url().match(/status\/([0-9a-f-]{36})/)?.[1];
     expect(id, 'Ідентифікатор заявки в URL сторінки статусу').toBeTruthy();
     return id!;
+  }
+
+  /** Сторінка статусу за ідентифікатором заявки (посилання, яке заявник отримує після подачі). */
+  async openStatus(applicationId: string) {
+    await this.page.goto(`${routes.registrationStatus}${applicationId}/`);
+    await expect(this.statusHeading).toBeVisible();
+  }
+
+  /** Після відмови: «Виправити та подати повторно» → та сама форма з новим документом → знову «Очікує перевірки». */
+  async resubmit(applicationId: string, user: ForeignUser) {
+    await this.openStatus(applicationId);
+    await this.resubmitLink.click();
+    await expect(this.page).toHaveURL(new RegExp(`${routes.resubmit(applicationId)}$`));
+    await this.fill(user);
+    await this.submit(); // кнопка «Подати заявку повторно»
+    expect(await this.expectSubmittedForModeration(), 'Повторна подача — та сама заявка').toBe(applicationId);
   }
 
   async expectNotSubmitted() {

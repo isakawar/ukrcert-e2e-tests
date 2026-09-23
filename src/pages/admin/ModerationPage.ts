@@ -1,58 +1,88 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { routes } from '../../config/routes';
 
-/** Сторінка модерації заявок/документів іноземних користувачів (розділ 3 вимог). TODO(dev): звірити з UI. */
+/** Вкладки сторінки «Заявки на реєстрацію іноземців» (параметр ?status=). */
+export type ModerationTab = 'pending' | 'approved' | 'rejected' | 'pending_document';
+
+export type ApplicationStatus = 'Очікує перевірки' | 'Схвалено' | 'Відхилено';
+
+/** Тип листа в таблиці «Повідомлення про рішення». */
+export type DecisionNotification = 'Заявку схвалено' | 'Відхилення заявки';
+
+/**
+ * Модерація заявок іноземців (розділ 3 вимог), ADMIN_BASE_URL. ✅ звірено з dev.
+ * Список: /foreign/registration/review/?status=… → заявка /review/<id>/ з даними, документами, рішенням і статусом листів.
+ */
 export class ModerationPage {
-  readonly documentPreview: Locator;
-  readonly residencePermitFlag: Locator;
+  readonly heading: Locator;
+  readonly summary: Locator;
+  readonly documents: Locator;
+  readonly notifications: Locator;
   readonly approveButton: Locator;
+  readonly rejectReason: Locator;
   readonly rejectButton: Locator;
 
-  constructor(private readonly page: Page) {
-    this.documentPreview = page
-      .locator('iframe, embed, object, img')
-      .or(page.getByRole('link', { name: /документ|переглянути|завантажити/i }))
-      .first();
-    this.residencePermitFlag = page.getByText(/тимчасов\w* посвідк/i).first();
-    this.approveButton = page.getByRole('button', { name: /погодити/i });
-    this.rejectButton = page.getByRole('button', { name: /відхилити/i }).first();
+  constructor(readonly page: Page) {
+    this.heading = page.getByRole('heading', { name: 'Перевірка заявки на реєстрацію іноземця' });
+    this.summary = page.locator('dl.foreign-identity-summary');
+    this.documents = page.getByRole('table', { name: 'Документи, що посвідчують особу' });
+    this.notifications = page.getByRole('table', { name: 'Повідомлення про рішення' });
+    this.approveButton = page.getByRole('button', { name: 'Схвалити заявку' });
+    this.rejectReason = page.getByLabel('Причина відхилення');
+    this.rejectButton = page.getByRole('button', { name: 'Відхилити заявку' });
   }
 
+  async open(tab: ModerationTab = 'pending') {
+    await this.page.goto(`${routes.moderation}?status=${tab}`);
+  }
+
+  /** Рядок заявки у відкритій вкладці списку. */
   row(email: string): Locator {
     return this.page.getByRole('row').filter({ hasText: email });
   }
 
-  /** Рядок заявки, що ще очікує рішення (після відмови в списку може лишатися старий рядок). */
-  pendingRow(email: string): Locator {
-    return this.row(email).filter({ hasText: /очіку/i });
+  /** Відкриває заявку зі списку вкладки `tab` → повертає її номер у модерації (/review/<id>/). */
+  async openApplication(email: string, tab: ModerationTab = 'pending'): Promise<number> {
+    await this.open(tab);
+    await expect(this.row(email), `Заявки ${email} немає у вкладці «${tab}»`).toHaveCount(1);
+    await this.row(email).getByRole('link').click();
+    await expect(this.heading).toBeVisible();
+    await expect(this.field('Електронна пошта')).toHaveText(email);
+    return Number(this.page.url().match(/review\/(\d+)\//)?.[1]);
   }
 
-  async open() {
-    await this.page.goto(routes.moderation);
+  /** Значення з блоку даних заявки: «Ім'я», «Країна проживання», «Тимчасова посвідка…», «Статус»… */
+  field(label: string | RegExp): Locator {
+    return this.summary.locator('dt').filter({ hasText: label }).locator('xpath=following-sibling::dd[1]');
   }
 
-  async openPendingApplication(email: string) {
-    await this.open();
-    const row = this.pendingRow(email);
-    await expect(row, `Заявки ${email} немає в черзі модерації`).toBeVisible();
-    const link = row.getByRole('link');
-    await ((await link.count()) ? link.first() : row).click();
-    await expect(this.page.getByText(email).first()).toBeVisible();
+  async expectStatus(status: ApplicationStatus) {
+    await expect(this.field('Статус')).toHaveText(status);
+  }
+
+  /** Рядки таблиці документів — від найновішого до найстарішого. */
+  documentRows(): Locator {
+    return this.documents.locator('tbody tr');
+  }
+
+  documentLink(fileName: string): Locator {
+    return this.documents.getByRole('link', { name: fileName, exact: true });
+  }
+
+  notification(type: DecisionNotification): Locator {
+    return this.notifications.getByRole('row').filter({ hasText: type });
   }
 
   async approve(email: string) {
-    await this.openPendingApplication(email);
+    await this.openApplication(email);
     await this.approveButton.click();
-    await expect(this.page.getByText(/погоджено/i).first()).toBeVisible();
+    await this.expectStatus('Схвалено');
   }
 
   async reject(email: string, reason: string) {
-    await this.openPendingApplication(email);
+    await this.openApplication(email);
+    await this.rejectReason.fill(reason);
     await this.rejectButton.click();
-    // Причина — у діалозі або інлайн-формі під кнопкою
-    const scope = (await this.page.getByRole('dialog').count()) ? this.page.getByRole('dialog') : this.page.locator('body');
-    await scope.getByLabel(/причин/i).fill(reason);
-    await scope.getByRole('button', { name: /відхилити|підтвердити/i }).last().click();
-    await expect(this.page.getByText(/відхилено/i).first()).toBeVisible();
+    await this.expectStatus('Відхилено');
   }
 }

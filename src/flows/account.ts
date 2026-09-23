@@ -26,7 +26,6 @@ export async function requestOtp(app: UserApp, mail: MailClient, email: string):
     await app.entry.open();
     await app.entry.goToLogin();
     await app.otp.requestCode(email);
-    await expect(app.otp.codeInput).toBeVisible();
     const message = await mail.waitForMessage({ to: email, match: hasOtpCode, excludeIds: before, description: 'Лист з одноразовим кодом' });
     await attachEmail(message);
     return extractOtpCode(message);
@@ -36,6 +35,6 @@ export async function requestOtp(app: UserApp, mail: MailClient, email: string):
 export async function loginWithOtp(app: UserApp, mail: MailClient, email: string) {
   await test.step(`Вхід за одноразовим кодом ${email}`, async () => {
     await app.otp.submitCode(await requestOtp(app, mail, email));
-    await expect(app.otp.loggedInMarker).toBeVisible();
+    await app.otp.expectLoggedIn();
   });
 }

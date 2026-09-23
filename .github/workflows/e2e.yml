@@ -10,6 +10,7 @@ on:
         default: registration
         options:
           - registration # етап 1: REG + INFRA
+          - moderation # етап 2: заявки A і B — модерація, вхід за кодом (2 заявки)
           - smoke
           - full # усе, крім @slow
           - custom # за полем grep нижче
@@ -74,7 +75,7 @@ jobs:
           # Несекретні налаштування — змінні репозиторію (Settings → Variables), з дефолтами для dev
           ENV_NAME: ${{ vars.ENV_NAME || 'dev' }}
           BASE_URL: ${{ vars.BASE_URL || 'https://lms-exam-foreign-dev.raccoongang.com' }}
-          ADMIN_BASE_URL: ${{ vars.ADMIN_BASE_URL }}
+          ADMIN_BASE_URL: ${{ vars.ADMIN_BASE_URL || 'https://lms-exam-dev.raccoongang.com' }}
           GEO_MODE: ${{ vars.GEO_MODE || 'none' }}
           MAIL_PROVIDER: ${{ vars.MAIL_PROVIDER || 'maildrop' }}
           EXAM_NAME: ${{ vars.EXAM_NAME }}
@@ -102,6 +103,7 @@ jobs:
           # Введення користувача — лише через змінні оточення, без підстановки в скрипт
           case "$SUITE" in
             registration) args=(--project=foreign --grep "REG-|INFRA-") ;;
+            moderation)   args=(--project=foreign tests/journey.spec.ts tests/moderation.spec.ts) ;;
             smoke)        args=(--grep @smoke) ;;
             full)         args=() ;;
             custom)

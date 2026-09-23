@@ -2,14 +2,13 @@ import fs from 'node:fs';
 import { test as base, expect, type Browser, type Page, type TestInfo } from '@playwright/test';
 import { env } from '../config/env';
 import { buildForeignUser, type ForeignUser } from '../data/users';
-import { activateAccount, loginWithOtp } from '../flows/account';
+import { loginWithOtp } from '../flows/account';
 import { registerForExam } from '../flows/exam';
-import { approveApplication } from '../flows/moderation';
-import { registerForeignUser } from '../flows/registration';
 import { adminApp, proctorApp, userApp, type AdminApp, type ProctorApp, type UserApp } from '../pages';
 import { applyAllureMeta } from '../reporting/allure';
 import { createMailClient, type MailClient } from '../services/mail';
 import { AUTH_FILES } from './authFiles';
+import { RUN_APPLICANTS, runState, type Applicant } from './runState';
 
 type Fixtures = {
   /** Сторінки іноземного користувача у вкладці `page` (гео — з проєкту). */
@@ -22,13 +21,12 @@ type Fixtures = {
   uaApp: UserApp;
   mail: MailClient;
 
-  // Стани іноземного користувача — кожен наступний будується на попередньому
+  /** Дані для нової заявки (сама заявка не створюється). */
   newUser: ForeignUser;
-  pendingUser: ForeignUser;
-  approvedUser: ForeignUser;
-  activeUser: ForeignUser;
-  loggedInUser: ForeignUser;
-  examRegisteredUser: ForeignUser;
+  // Стани заявника A цього прогону (tests/journey.spec.ts) — нових заявок ці фікстури не створюють
+  approvedUser: Applicant;
+  loggedInUser: Applicant;
+  examRegisteredUser: Applicant;
 
   allureMeta: void;
 };
@@ -53,7 +51,9 @@ export const test = base.extend<Fixtures>({
     { auto: true },
   ],
 
-  mail: async ({}, use) => {
+  mail: async ({}, use, testInfo) => {
+    // Очікування листа (до 90 с) + дії навколо не вміщаються в дефолтні 90 с тесту
+    testInfo.setTimeout(Math.max(testInfo.timeout, 180_000));
     await use(createMailClient());
   },
 
@@ -82,25 +82,15 @@ export const test = base.extend<Fixtures>({
     await use(buildForeignUser(mail.newAddress()));
   },
 
-  pendingUser: async ({ app, newUser }, use) => {
-    await registerForeignUser(app, newUser);
-    await use(newUser);
+  // Ліміт — 1-2 заявки на прогін, тож етапи після модерації беруть схваленого заявника A, а не реєструють нового
+  approvedUser: async ({}, use, testInfo) => {
+    testInfo.skip(!env.hasAdmin, 'ADMIN_EMAIL не задано: схваленого заявника немає');
+    await use(runState.get(RUN_APPLICANTS.approved, 'MOD-03'));
   },
 
-  // admin першим: без сесії адміна тест пропускається ДО створення заявки
-  approvedUser: async ({ admin, pendingUser }, use) => {
-    await approveApplication(admin, pendingUser.email);
-    await use(pendingUser);
-  },
-
-  activeUser: async ({ approvedUser, app, mail }, use) => {
-    await activateAccount(app, mail, approvedUser.email);
+  loggedInUser: async ({ approvedUser, app, mail }, use) => {
+    await loginWithOtp(app, mail, approvedUser.email);
     await use(approvedUser);
-  },
-
-  loggedInUser: async ({ activeUser, app, mail }, use) => {
-    await loginWithOtp(app, mail, activeUser.email);
-    await use(activeUser);
   },
 
   examRegisteredUser: async ({ loggedInUser, app }, use) => {
